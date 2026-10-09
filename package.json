@@ -1,0 +1,40 @@
+{
+  "name": "rocketleagueroundrobin",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "index.js",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "test": "vitest run"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jjoseph357/RocketLeagueRoundRobin.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/jjoseph357/RocketLeagueRoundRobin/issues"
+  },
+  "homepage": "https://github.com/jjoseph357/RocketLeagueRoundRobin#readme",
+  "description": "",
+  "devDependencies": {
+    "@types/canvas-confetti": "^1.9.0",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.1.2",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.4",
+    "vitest": "^5.0.3"
+  },
+  "dependencies": {
+    "canvas-confetti": "^1.9.4",
+    "lucide-react": "^1.53.0",
+    "mqtt": "^5.16.0",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0"
+  }
+}
