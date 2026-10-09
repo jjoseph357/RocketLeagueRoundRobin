@@ -180,7 +180,9 @@ export const PodiumView: React.FC<PodiumViewProps> = ({
             {longestStreakPlayer ? longestStreakPlayer.playerName : '-'}
           </div>
           <div style={{ fontSize: '0.82rem', color: '#FF5722', fontWeight: 700 }}>
-            {longestStreakPlayer ? `🔥 ${longestStreakPlayer.bestStreak} Win Streak` : ''}
+            {longestStreakPlayer && longestStreakPlayer.bestStreak > 0
+              ? `🔥 ${longestStreakPlayer.bestStreak} Win Streak`
+              : 'No streaks recorded'}
           </div>
         </div>
 

@@ -60,12 +60,20 @@ export class LobbyNetwork {
   private initBroadcastChannel() {
     try {
       if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
-        this.broadcastChannel = new BroadcastChannel(`rlrr_${this.lobbyCode}`);
+        const channelName = `rlrr_${this.lobbyCode.toUpperCase()}`;
+        this.broadcastChannel = new BroadcastChannel(channelName);
         this.broadcastChannel.onmessage = (event) => {
           this.handleRawMessage(event.data);
         };
         this.localConnected = true;
         this.notifyStatus();
+
+        // Immediately request state across local tabs
+        setTimeout(() => {
+          if (!this.isDestroyed) {
+            this.send({ type: 'REQUEST_STATE', senderId: this.myPlayerId });
+          }
+        }, 50);
       }
     } catch (e) {
       console.warn('BroadcastChannel not supported in this environment', e);

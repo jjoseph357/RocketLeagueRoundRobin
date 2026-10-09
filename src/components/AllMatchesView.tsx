@@ -8,6 +8,7 @@ interface AllMatchesViewProps {
   statsMap: Map<string, PlayerStats>;
   currentUser: Player;
   onHostOverride: (matchId: string, blueScore: number, orangeScore: number) => void;
+  onGoToMyMatch?: () => void;
 }
 
 export const AllMatchesView: React.FC<AllMatchesViewProps> = ({
@@ -16,6 +17,7 @@ export const AllMatchesView: React.FC<AllMatchesViewProps> = ({
   statsMap,
   currentUser,
   onHostOverride,
+  onGoToMyMatch,
 }) => {
   const [activeOverrideMatchId, setActiveOverrideMatchId] = useState<string | null>(null);
   const [overrideBlue, setOverrideBlue] = useState(0);
@@ -279,6 +281,19 @@ export const AllMatchesView: React.FC<AllMatchesViewProps> = ({
                   </div>
                 </div>
               </div>
+
+              {/* Quick Report Link for User Match */}
+              {isUserInMatch && match.status !== 'completed' && onGoToMyMatch && (
+                <div style={{ marginBottom: '0.75rem' }}>
+                  <button
+                    onClick={onGoToMyMatch}
+                    className="btn-gold"
+                    style={{ fontSize: '0.8rem', padding: '0.4rem 0.75rem', width: '100%' }}
+                  >
+                    🎮 Go to My Match (Report Score)
+                  </button>
+                </div>
+              )}
 
               {/* Host Override Controls */}
               {currentUser.isHost && (

@@ -54,8 +54,18 @@ export const App: React.FC = () => {
   const [currentUser, setCurrentUser] = useState<Player | null>(() => {
     const id = localStorage.getItem(STORAGE_KEY_USER_ID);
     const name = localStorage.getItem(STORAGE_KEY_USER_NAME);
+    const savedLobby = localStorage.getItem(STORAGE_KEY_LOBBY);
+    let isHostInitial = false;
+    if (savedLobby && id) {
+      try {
+        const parsed = JSON.parse(savedLobby);
+        if (parsed?.hostId === id) {
+          isHostInitial = true;
+        }
+      } catch {}
+    }
     if (id && name) {
-      return { id, name, status: 'active', isHost: false, joinedAt: Date.now() };
+      return { id, name, status: 'active', isHost: isHostInitial, joinedAt: Date.now() };
     }
     return null;
   });
@@ -71,6 +81,20 @@ export const App: React.FC = () => {
     }
     return null;
   });
+
+  const isHost = Boolean(
+    currentUser && lobby && (currentUser.id === lobby.hostId || currentUser.isHost)
+  );
+
+  // Synchronize currentUser.isHost with lobby.hostId
+  useEffect(() => {
+    if (lobby && currentUser) {
+      const shouldBeHost = lobby.hostId === currentUser.id;
+      if (currentUser.isHost !== shouldBeHost) {
+        setCurrentUser((prev) => (prev ? { ...prev, isHost: shouldBeHost } : null));
+      }
+    }
+  }, [lobby?.hostId, currentUser?.id]);
 
   const [currentTab, setCurrentTab] = useState<
     'my_match' | 'all_matches' | 'leaderboard' | 'history' | 'players'
@@ -110,7 +134,8 @@ export const App: React.FC = () => {
       } else if (msg.type === 'REQUEST_STATE') {
         // If we are host, broadcast current state
         setLobby((currentLobby) => {
-          if (currentLobby && currentUser?.isHost && networkRef.current) {
+          const amHost = currentLobby && (currentLobby.hostId === currentUser?.id || currentUser?.isHost);
+          if (currentLobby && amHost && networkRef.current) {
             networkRef.current.send({
               type: 'STATE_SYNC',
               state: currentLobby,
@@ -122,25 +147,64 @@ export const App: React.FC = () => {
       } else if (msg.type === 'PLAYER_JOIN') {
         setLobby((prev) => {
           if (!prev) return null;
+          const amHost = prev.hostId === currentUser?.id || currentUser?.isHost;
           const exists = prev.players.some((p) => p.id === msg.player.id);
-          if (exists) return prev;
 
-          const newPlayer: Player = {
-            id: msg.player.id,
-            name: msg.player.name,
-            status: 'active',
-            isHost: false,
-            joinedAt: Date.now(),
-          };
+          let updated = prev;
+          if (!exists) {
+            const newPlayer: Player = {
+              id: msg.player.id,
+              name: msg.player.name,
+              status: 'active',
+              isHost: false,
+              joinedAt: Date.now(),
+            };
+
+            updated = {
+              ...prev,
+              players: [...prev.players, newPlayer],
+              revision: prev.revision + 1,
+              lastUpdated: Date.now(),
+            };
+          }
+
+          // Always broadcast state from host so re-joining / refreshing clients receive latest state
+          if (amHost && networkRef.current) {
+            networkRef.current.send({
+              type: 'STATE_SYNC',
+              state: updated,
+              senderId: currentUser.id,
+            });
+          }
+          return updated;
+        });
+      } else if (msg.type === 'PLAYER_LEAVE') {
+        setLobby((prev) => {
+          if (!prev) return null;
+          const amHost = prev.hostId === currentUser?.id || currentUser?.isHost;
+
+          // Reassign host if host left
+          let nextHostId = prev.hostId;
+          if (prev.hostId === msg.playerId) {
+            const remaining = prev.players.filter((p) => p.id !== msg.playerId && p.status === 'active');
+            if (remaining.length > 0) {
+              nextHostId = remaining[0].id;
+            }
+          }
+
+          const updatedPlayers = prev.phase === 'setup'
+            ? prev.players.filter((p) => p.id !== msg.playerId)
+            : prev.players.map((p) => p.id === msg.playerId ? { ...p, status: 'left' as const } : p);
 
           const updated: LobbyState = {
             ...prev,
-            players: [...prev.players, newPlayer],
+            hostId: nextHostId,
+            players: updatedPlayers,
             revision: prev.revision + 1,
             lastUpdated: Date.now(),
           };
 
-          if (currentUser?.isHost && networkRef.current) {
+          if (amHost && networkRef.current) {
             networkRef.current.send({
               type: 'STATE_SYNC',
               state: updated,
@@ -169,7 +233,8 @@ export const App: React.FC = () => {
             lastUpdated: Date.now(),
           };
 
-          if (currentUser?.isHost && networkRef.current) {
+          const amHost = prev.hostId === currentUser?.id || currentUser?.isHost;
+          if (amHost && networkRef.current) {
             networkRef.current.send({
               type: 'STATE_SYNC',
               state: updated,
@@ -190,7 +255,8 @@ export const App: React.FC = () => {
             revision: prev.revision + 1,
             lastUpdated: Date.now(),
           };
-          if (currentUser?.isHost && networkRef.current) {
+          const amHost = prev.hostId === currentUser?.id || currentUser?.isHost;
+          if (amHost && networkRef.current) {
             networkRef.current.send({
               type: 'STATE_SYNC',
               state: updated,
@@ -381,6 +447,16 @@ export const App: React.FC = () => {
 
   const handleToggleStatus = (status: 'active' | 'sitting_out') => {
     if (!currentUser || !lobby) return;
+
+    if (networkRef.current) {
+      networkRef.current.send({
+        type: 'PLAYER_STATUS_CHANGE',
+        playerId: currentUser.id,
+        status,
+        senderId: currentUser.id,
+      });
+    }
+
     const updatedPlayers = lobby.players.map((p) =>
       p.id === currentUser.id ? { ...p, status } : p
     );
@@ -390,7 +466,15 @@ export const App: React.FC = () => {
       revision: lobby.revision + 1,
       lastUpdated: Date.now(),
     };
-    broadcastState(updated);
+
+    setLobby(updated);
+    if (isHost && networkRef.current) {
+      networkRef.current.send({
+        type: 'STATE_SYNC',
+        state: updated,
+        senderId: currentUser.id,
+      });
+    }
   };
 
   const handleLeaveLobby = () => {
@@ -406,7 +490,7 @@ export const App: React.FC = () => {
   };
 
   const handleRemovePlayer = (playerId: string) => {
-    if (!lobby || !currentUser?.isHost) return;
+    if (!lobby || !isHost) return;
     const updated: LobbyState = {
       ...lobby,
       players: lobby.players.filter((p) => p.id !== playerId),
@@ -417,7 +501,7 @@ export const App: React.FC = () => {
   };
 
   const handleAddDemoPlayers = (count: number) => {
-    if (!lobby || !currentUser?.isHost) return;
+    if (!lobby || !isHost) return;
     const existingNames = new Set(lobby.players.map((p) => p.name));
     const available = DEMO_NAMES.filter((n) => !existingNames.has(n));
 
@@ -443,7 +527,7 @@ export const App: React.FC = () => {
   };
 
   const handleStartTournament = () => {
-    if (!lobby || !currentUser?.isHost) return;
+    if (!lobby || !isHost) return;
     const active = lobby.players.filter((p) => p.status === 'active');
     if (active.length < 2) return;
 
@@ -461,8 +545,12 @@ export const App: React.FC = () => {
   };
 
   const handleAdvanceRound = () => {
-    if (!lobby || !currentUser?.isHost) return;
+    if (!lobby || !isHost) return;
     const active = lobby.players.filter((p) => p.status === 'active');
+    if (active.length < 2) {
+      alert('Cannot advance round: At least 2 active players are required to generate matches.');
+      return;
+    }
     const nextRoundNumber = lobby.currentRoundNumber + 1;
 
     // Mark previous round completed
@@ -487,6 +575,17 @@ export const App: React.FC = () => {
 
   const handleSubmitScore = (matchId: string, report: ScoreReport) => {
     if (!lobby) return;
+
+    // Send SCORE_REPORT event to network peers
+    if (networkRef.current && currentUser) {
+      networkRef.current.send({
+        type: 'SCORE_REPORT',
+        matchId,
+        report,
+        senderId: currentUser.id,
+      });
+    }
+
     const currentR = lobby.rounds[lobby.rounds.length - 1];
     if (!currentR) return;
 
@@ -504,11 +603,20 @@ export const App: React.FC = () => {
       lastUpdated: Date.now(),
     };
 
-    broadcastState(updated);
+    setLobby(updated);
+
+    // If host, broadcast authoritative state sync
+    if (isHost && networkRef.current && currentUser) {
+      networkRef.current.send({
+        type: 'STATE_SYNC',
+        state: updated,
+        senderId: currentUser.id,
+      });
+    }
   };
 
   const handleHostOverride = (matchId: string, blueScore: number, orangeScore: number) => {
-    if (!lobby || !currentUser?.isHost) return;
+    if (!lobby || !isHost) return;
     const currentR = lobby.rounds[lobby.rounds.length - 1];
     if (!currentR) return;
 
@@ -530,7 +638,7 @@ export const App: React.FC = () => {
   };
 
   const handleEndTournament = () => {
-    if (!lobby || !currentUser?.isHost) return;
+    if (!lobby || !isHost) return;
     const updated: LobbyState = {
       ...lobby,
       phase: 'podium',
@@ -541,7 +649,7 @@ export const App: React.FC = () => {
   };
 
   const handleResumeTournament = () => {
-    if (!lobby || !currentUser?.isHost) return;
+    if (!lobby || !isHost) return;
     const updated: LobbyState = {
       ...lobby,
       phase: 'in_progress',
@@ -552,7 +660,7 @@ export const App: React.FC = () => {
   };
 
   const handleRestartTournament = () => {
-    if (!lobby || !currentUser?.isHost) return;
+    if (!lobby || !isHost) return;
     const updated: LobbyState = {
       ...lobby,
       phase: 'setup',
@@ -565,7 +673,7 @@ export const App: React.FC = () => {
   };
 
   const handleSimulatePendingMatches = () => {
-    if (!lobby || !currentUser?.isHost || !currentRound) return;
+    if (!lobby || !isHost || !currentRound) return;
 
     const updatedMatches = currentRound.matches.map((m) => {
       if (m.status === 'completed') return m;
@@ -735,6 +843,7 @@ export const App: React.FC = () => {
                 statsMap={statsMap}
                 currentUser={currentUser}
                 onHostOverride={handleHostOverride}
+                onGoToMyMatch={() => setCurrentTab('my_match')}
               />
             )}
 
@@ -771,7 +880,7 @@ export const App: React.FC = () => {
       </main>
 
       {/* Host Floating Control Bar (when in progress) */}
-      {lobby && lobby.phase === 'in_progress' && currentUser?.isHost && (
+      {lobby && lobby.phase === 'in_progress' && isHost && (
         <div
           style={{
             position: 'fixed',

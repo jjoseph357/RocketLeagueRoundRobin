@@ -30,7 +30,14 @@ export const SetupView: React.FC<SetupViewProps> = ({
 }) => {
   const [playerName, setPlayerName] = useState('');
   const [joinCode, setJoinCode] = useState(initialCode);
-  const [mode, setMode] = useState<'create' | 'join'>('create');
+  const [mode, setMode] = useState<'create' | 'join'>(initialCode ? 'join' : 'create');
+
+  React.useEffect(() => {
+    if (initialCode) {
+      setJoinCode(initialCode);
+      setMode('join');
+    }
+  }, [initialCode]);
 
   // If not joined to a lobby yet, show Join/Create Card
   if (!lobby || !currentUser) {
